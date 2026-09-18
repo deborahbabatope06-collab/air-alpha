@@ -14,7 +14,7 @@ __pycache__/
 # Database
 data/*.db
 data/*.db-journal
-data/**/*.db
+data/**/*.dbg
 
 # Logs
 logs/

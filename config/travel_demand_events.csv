@@ -1,0 +1,7 @@
+event_name,event_type,market_scope,start_month,start_day,end_month,end_day
+Christmas and New Year,major_holiday,ALL,12,19,1,4
+Easter,major_holiday,ALL,4,2,4,16
+England February half-term,school_holiday,UK,2,15,2,21
+England May half-term,school_holiday,UK,5,29,6,6
+England summer school holidays,school_holiday,UK,7,22,9,1
+England October half-term,school_holiday,UK,10,23,10,31

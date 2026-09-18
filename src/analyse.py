@@ -1,8 +1,13 @@
 import pandas as pd
 import sqlite3
 from pathlib import Path
+
 ANALYSIS_DB_PATH = Path(
     "data/analysis/airfares.db"
+)
+
+CALENDAR_PATH = Path(
+    "config/travel_demand_events.csv"
 )
 
 # load fare observations
@@ -21,6 +26,168 @@ def load_data():
 
     return df
 
+def load_calendar_events():
+    """
+    Load recurring travel-demand events.
+
+    CSV contains month/day definitions - the year is generated from the
+    departure dates in the airfare dataset.
+    """
+
+    events = pd.read_csv(
+        CALENDAR_PATH
+    )
+
+    return events
+
+def add_calendar_features(df):
+    """
+    Add travel-demand calendar variables based on
+    the departure date.
+
+    Event dates are generated for the years present
+    in the airfare dataset.
+    """
+
+    events = load_calendar_events()
+
+    df = df.copy()
+
+    # Candidate calendar features.
+    df["uk_school_holiday"] = False
+    df["school_holiday_name"] = pd.NA
+
+    df["major_holiday"] = False
+    df["major_holiday_window_7d"] = False
+    df["major_holiday_name"] = pd.NA
+
+    # Generate enough years to cover the dataset.
+    min_year = (
+        df["departure_date"]
+        .dt.year
+        .min()
+    )
+
+    max_year = (
+        df["departure_date"]
+        .dt.year
+        .max()
+    )
+
+    generated_events = []
+
+    for year in range(
+        min_year - 1,
+        max_year + 2,
+    ):
+
+        for _, event in events.iterrows():
+
+            start_year = year
+            end_year = year
+
+            # Detect events that cross New Year.
+            if (
+                int(event["end_month"])
+                < int(event["start_month"])
+                or (
+                    int(event["end_month"])
+                    == int(event["start_month"])
+                    and int(event["end_day"])
+                    < int(event["start_day"])
+                )
+            ):
+                end_year = year + 1
+
+            start_date = pd.Timestamp(
+                year=start_year,
+                month=int(event["start_month"]),
+                day=int(event["start_day"]),
+            )
+
+            end_date = pd.Timestamp(
+                year=end_year,
+                month=int(event["end_month"]),
+                day=int(event["end_day"]),
+            )
+
+            generated_events.append(
+                {
+                    "event_name": event["event_name"],
+                    "event_type": event["event_type"],
+                    "market_scope": event["market_scope"],
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
+
+    generated_events = pd.DataFrame(
+        generated_events
+    )
+
+    for _, event in generated_events.iterrows():
+
+        start_date = event["start_date"]
+        end_date = event["end_date"]
+
+        # Exact event period.
+        in_event = (
+            (df["departure_date"] >= start_date)
+            &
+            (df["departure_date"] <= end_date)
+        )
+
+        # Seven-day window around the event.
+        in_window = (
+            (
+                df["departure_date"]
+                >= start_date - pd.Timedelta(days=7)
+            )
+            &
+            (
+                df["departure_date"]
+                <= end_date + pd.Timedelta(days=7)
+            )
+        )
+
+        # UK school holidays.
+        if (
+            event["market_scope"] == "UK"
+            and event["event_type"] == "school_holiday"
+        ):
+
+            df.loc[
+                in_event,
+                "uk_school_holiday"
+            ] = True
+
+            df.loc[
+                in_event,
+                "school_holiday_name"
+            ] = event["event_name"]
+
+        # Major holidays applying to all routes.
+        if (
+            event["market_scope"] == "ALL"
+            and event["event_type"] == "major_holiday"
+        ):
+
+            df.loc[
+                in_event,
+                "major_holiday"
+            ] = True
+
+            df.loc[
+                in_window,
+                "major_holiday_window_7d"
+            ] = True
+
+            df.loc[
+                in_event,
+                "major_holiday_name"
+            ] = event["event_name"]
+
+    return df
 
 def prepare_data(df):
     """
@@ -126,6 +293,7 @@ def prepare_data(df):
         .dt.hour
     )
 
+
     # -----------------------------------
     # Expected sampling regime
     # -----------------------------------
@@ -144,6 +312,8 @@ def prepare_data(df):
             "daily",
         ],
     )
+
+    df=add_calendar_features(df)
 
     return df
 
@@ -257,6 +427,29 @@ def validate_data(df):
         df["sampling_frequency"].value_counts()
     )
 
+    print(
+        "\nTravel-demand event counts:"
+    )
+
+    print(
+        f"UK school holiday: "
+        f"{df['uk_school_holiday'].sum():,}"
+    )
+
+    print(
+    f"Named school-holiday observations: "
+    f"{df['school_holiday_name'].notna().sum():,}"
+    )
+
+    print(
+        f"Major holiday: "
+        f"{df['major_holiday'].sum():,}"
+    )
+
+    print(
+    f"Major-holiday window (7d): "
+    f"{df['major_holiday_window_7d'].sum():,}"
+    )
 
 def route_summary(df):
     """
@@ -386,11 +579,11 @@ def collection_summary(df):
                 "max",
             ),
         )
-        .sort_index()
+        .reset_index()
     )
 
     print(
-        summary.tail(20)
+        summary.tail(20) 
     )
 
 
@@ -412,6 +605,11 @@ def show_sample(df):
         "departure_weekday",
         "departure_hour",
         "price",
+        "uk_school_holiday",
+        "school_holiday_name",
+        "major_holiday",
+        "major_holiday_window_7d",
+        "major_holiday_name",
     ]
 
     print(
